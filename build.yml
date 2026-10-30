@@ -1,0 +1,664 @@
+name: Crea APK Sentiero
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+      - name: Scrivi i file del progetto
+        run: |
+          mkdir -p app
+          cat > app/build.gradle.kts <<'SENTIERO_EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "it.sentiero.tracker"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "it.sentiero.tracker"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("org.osmdroid:osmdroid-android:6.1.18")
+              implementation("androidx.core:core:1.13.1")
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'SENTIERO_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/ic_menu_mylocation"
+                  android:label="Sentiero"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".TrackService"
+                      android:exported="false"
+                      android:foregroundServiceType="location" />
+
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.files"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
+              </application>
+          </manifest>
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/MainActivity.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.Manifest
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.location.LocationManager
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.Gravity
+          import android.view.ViewGroup
+          import android.view.WindowManager
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import android.widget.Toast
+          import androidx.core.content.FileProvider
+          import org.osmdroid.config.Configuration
+          import org.osmdroid.events.MapEventsReceiver
+          import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+          import org.osmdroid.util.GeoPoint
+          import org.osmdroid.views.MapView
+          import org.osmdroid.views.overlay.MapEventsOverlay
+          import org.osmdroid.views.overlay.Marker
+          import org.osmdroid.views.overlay.Polyline
+          import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
+          import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+          import java.io.File
+          import java.util.Locale
+
+          class MainActivity : Activity() {
+
+              private lateinit var map: MapView
+              private lateinit var line: Polyline
+              private lateinit var tvDist: TextView
+              private lateinit var tvTime: TextView
+              private lateinit var tvAvg: TextView
+              private lateinit var tvSpeed: TextView
+              private lateinit var tvAlt: TextView
+              private lateinit var tvUp: TextView
+              private lateinit var btnRec: Button
+              private lateinit var btnNav: Button
+              private var me: MyLocationNewOverlay? = null
+              private var destMarker: Marker? = null
+              private var dest: GeoPoint? = null
+              private var drawnCount = -1
+              private val handler = Handler(Looper.getMainLooper())
+              private val tick = object : Runnable {
+                  override fun run() {
+                      refresh()
+                      handler.postDelayed(this, 1000L)
+                  }
+              }
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              private fun cell(parent: LinearLayout, label: String): TextView {
+                  val box = LinearLayout(this)
+                  box.orientation = LinearLayout.VERTICAL
+                  box.setPadding(dp(8), dp(4), dp(8), dp(4))
+                  val l = TextView(this)
+                  l.text = label
+                  l.textSize = 11f
+                  l.setTextColor(Color.GRAY)
+                  val v = TextView(this)
+                  v.text = "-"
+                  v.textSize = 22f
+                  v.setTextColor(Color.BLACK)
+                  v.typeface = Typeface.MONOSPACE
+                  box.addView(l)
+                  box.addView(v)
+                  parent.addView(box, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                  return v
+              }
+
+              private fun row(parent: LinearLayout): LinearLayout {
+                  val r = LinearLayout(this)
+                  r.orientation = LinearLayout.HORIZONTAL
+                  parent.addView(r, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  return r
+              }
+
+              private fun button(parent: LinearLayout, text: String): Button {
+                  val b = Button(this)
+                  b.text = text
+                  val lp = LinearLayout.LayoutParams(0, dp(52), 1f)
+                  lp.setMargins(dp(4), dp(4), dp(4), dp(4))
+                  parent.addView(b, lp)
+                  return b
+              }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val cfg = Configuration.getInstance()
+                  cfg.load(this, getSharedPreferences("osm", Context.MODE_PRIVATE))
+                  cfg.userAgentValue = packageName
+                  cfg.osmdroidBasePath = File(cacheDir, "osm")
+                  cfg.osmdroidTileCache = File(cacheDir, "osm/tiles")
+
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setBackgroundColor(Color.WHITE)
+
+                  map = MapView(this)
+                  map.setTileSource(TileSourceFactory.MAPNIK)
+                  map.setMultiTouchControls(true)
+                  map.controller.setZoom(16.0)
+                  map.controller.setCenter(GeoPoint(43.8650, 11.2750))
+                  root.addView(map, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+                  line = Polyline()
+                  line.outlinePaint.color = Color.rgb(182, 72, 26)
+                  line.outlinePaint.strokeWidth = 10f
+                  map.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
+                      override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean = false
+                      override fun longPressHelper(p: GeoPoint?): Boolean {
+                          if (p != null) setDest(p)
+                          return true
+                      }
+                  }))
+                  map.overlays.add(line)
+
+                  val panel = LinearLayout(this)
+                  panel.orientation = LinearLayout.VERTICAL
+                  panel.setPadding(dp(8), dp(6), dp(8), dp(8))
+                  val r1 = row(panel)
+                  tvDist = cell(r1, "DISTANZA km")
+                  tvTime = cell(r1, "TEMPO")
+                  tvAvg = cell(r1, "MEDIA km/h")
+                  val r2 = row(panel)
+                  tvSpeed = cell(r2, "VELOCITA km/h")
+                  tvAlt = cell(r2, "QUOTA m")
+                  tvUp = cell(r2, "SALITA m")
+                  val r3 = row(panel)
+                  btnRec = button(r3, "REGISTRA")
+                  btnNav = button(r3, "NAVIGA")
+                  val r4 = row(panel)
+                  val btnList = button(r4, "LE MIE TRACCE")
+                  val btnCenter = button(r4, "CENTRA")
+                  root.addView(panel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  setContentView(root)
+
+                  btnNav.isEnabled = false
+                  btnRec.setOnClickListener {
+                      if (TrackStore.recording) stopRec() else startRec()
+                  }
+                  btnNav.setOnClickListener { navigate() }
+                  btnList.setOnClickListener { showTracks() }
+                  btnCenter.setOnClickListener {
+                      val m = me
+                      if (m != null) {
+                          m.enableFollowLocation()
+                      } else {
+                          askPerms()
+                      }
+                  }
+                  TrackStore.listener = { runOnUiThread { refresh() } }
+
+                  if (hasLoc()) {
+                      enableMe()
+                  } else {
+                      askPerms()
+                  }
+                  Toast.makeText(this, "Tieni premuto sulla mappa per scegliere la destinazione", Toast.LENGTH_LONG).show()
+              }
+
+              private fun hasLoc(): Boolean =
+                  checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+              private fun askPerms() {
+                  val p = ArrayList<String>()
+                  p.add(Manifest.permission.ACCESS_FINE_LOCATION)
+                  p.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                  if (Build.VERSION.SDK_INT >= 33) p.add(Manifest.permission.POST_NOTIFICATIONS)
+                  requestPermissions(p.toTypedArray(), 1)
+              }
+
+              override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+                  if (hasLoc()) enableMe()
+              }
+
+              private fun enableMe() {
+                  if (me != null || !hasLoc()) return
+                  val o = MyLocationNewOverlay(GpsMyLocationProvider(this), map)
+                  o.enableMyLocation()
+                  o.enableFollowLocation()
+                  map.overlays.add(o)
+                  me = o
+                  map.invalidate()
+              }
+
+              private fun startRec() {
+                  if (!hasLoc()) {
+                      askPerms()
+                      return
+                  }
+                  val lm = getSystemService(LocationManager::class.java)
+                  if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                      Toast.makeText(this, "Attiva la posizione (GPS) nelle impostazioni del telefono", Toast.LENGTH_LONG).show()
+                      return
+                  }
+                  TrackStore.reset()
+                  drawnCount = -1
+                  startForegroundService(Intent(this, TrackService::class.java))
+                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                  me?.enableFollowLocation()
+                  refresh()
+              }
+
+              private fun stopRec() {
+                  stopService(Intent(this, TrackService::class.java))
+                  window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                  handler.postDelayed({
+                      val msg = if (TrackStore.points.size >= 2) "Traccia salvata in LE MIE TRACCE" else "Traccia troppo corta, non salvata"
+                      Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                      refresh()
+                  }, 600L)
+              }
+
+              private fun setDest(p: GeoPoint) {
+                  destMarker?.let { map.overlays.remove(it) }
+                  val m = Marker(map)
+                  m.position = p
+                  m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                  m.title = "Destinazione"
+                  map.overlays.add(m)
+                  destMarker = m
+                  dest = p
+                  btnNav.isEnabled = true
+                  map.invalidate()
+                  Toast.makeText(this, "Destinazione impostata. Premi NAVIGA.", Toast.LENGTH_SHORT).show()
+              }
+
+              private fun navigate() {
+                  val d = dest ?: return
+                  val i = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${d.latitude},${d.longitude}&mode=d"))
+                  i.setPackage("com.google.android.apps.maps")
+                  try {
+                      startActivity(i)
+                  } catch (e: Exception) {
+                      try {
+                          startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:${d.latitude},${d.longitude}?q=${d.latitude},${d.longitude}")))
+                      } catch (e2: Exception) {
+                          Toast.makeText(this, "Nessuna app di navigazione trovata", Toast.LENGTH_LONG).show()
+                      }
+                  }
+              }
+
+              private fun fmt(v: Double, d: Int): String = String.format(Locale.ITALY, "%." + d + "f", v)
+
+              private fun refresh() {
+                  val s = TrackStore
+                  btnRec.text = if (s.recording) "STOP" else "REGISTRA"
+                  val sec = s.elapsedSeconds()
+                  tvTime.text = String.format(Locale.ITALY, "%d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60)
+                  tvDist.text = fmt(s.distance / 1000.0, 2)
+                  tvAvg.text = if (sec > 5) fmt(s.distance / sec * 3.6, 1) else "-"
+                  tvSpeed.text = if (s.recording) fmt(s.lastSpeed * 3.6, 1) else "-"
+                  val last = if (s.points.isEmpty()) null else s.points[s.points.size - 1]
+                  tvAlt.text = if (last?.ele != null) fmt(last.ele, 0) else "-"
+                  tvUp.text = fmt(s.ascent, 0)
+                  if (s.points.size != drawnCount) {
+                      val gp = ArrayList<GeoPoint>(s.points.size)
+                      for (p in s.points) gp.add(GeoPoint(p.lat, p.lon))
+                      line.setPoints(gp)
+                      drawnCount = s.points.size
+                      map.invalidate()
+                  }
+              }
+
+              private fun showTracks() {
+                  val dir = File(filesDir, "tracks")
+                  val files = (dir.listFiles() ?: arrayOf<File>())
+                      .filter { it.name.endsWith(".gpx") }
+                      .sortedByDescending { it.name }
+                  if (files.isEmpty()) {
+                      Toast.makeText(this, "Nessuna traccia salvata", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+                  val names = files.map { it.name.removeSuffix(".gpx") + "  (" + (it.length() / 1024 + 1) + " KB)" }.toTypedArray()
+                  AlertDialog.Builder(this)
+                      .setTitle("Le mie tracce")
+                      .setItems(names) { _, i -> trackActions(files[i]) }
+                      .setNegativeButton("Chiudi", null)
+                      .show()
+              }
+
+              private fun trackActions(f: File) {
+                  AlertDialog.Builder(this)
+                      .setTitle(f.name.removeSuffix(".gpx"))
+                      .setPositiveButton("Condividi") { _, _ -> share(f) }
+                      .setNeutralButton("Elimina") { _, _ ->
+                          f.delete()
+                          Toast.makeText(this, "Traccia eliminata", Toast.LENGTH_SHORT).show()
+                      }
+                      .setNegativeButton("Annulla", null)
+                      .show()
+              }
+
+              private fun share(f: File) {
+                  val uri = FileProvider.getUriForFile(this, "$packageName.files", f)
+                  val i = Intent(Intent.ACTION_SEND)
+                  i.type = "application/gpx+xml"
+                  i.putExtra(Intent.EXTRA_STREAM, uri)
+                  i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                  startActivity(Intent.createChooser(i, "Condividi traccia GPX"))
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  map.onResume()
+                  drawnCount = -1
+                  handler.post(tick)
+              }
+
+              override fun onPause() {
+                  handler.removeCallbacks(tick)
+                  map.onPause()
+                  super.onPause()
+              }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/TrackService.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Intent
+          import android.content.pm.ServiceInfo
+          import android.location.Location
+          import android.location.LocationListener
+          import android.location.LocationManager
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.IBinder
+
+          class TrackService : Service(), LocationListener {
+
+              private var lm: LocationManager? = null
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val nm = getSystemService(NotificationManager::class.java)
+                  nm.createNotificationChannel(
+                      NotificationChannel("rec", "Registrazione percorso", NotificationManager.IMPORTANCE_LOW)
+                  )
+                  val pi = PendingIntent.getActivity(
+                      this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val n = Notification.Builder(this, "rec")
+                      .setContentTitle("Sentiero")
+                      .setContentText("Registrazione del percorso in corso")
+                      .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                      .setContentIntent(pi)
+                      .setOngoing(true)
+                      .build()
+                  if (Build.VERSION.SDK_INT >= 29) {
+                      startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                  } else {
+                      startForeground(1, n)
+                  }
+                  val m = getSystemService(LocationManager::class.java)
+                  lm = m
+                  try {
+                      m.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 2f, this)
+                  } catch (e: SecurityException) {
+                      stopSelf()
+                  }
+                  return START_NOT_STICKY
+              }
+
+              override fun onLocationChanged(l: Location) {
+                  if (l.hasAccuracy() && l.accuracy > 40f) return
+                  TrackStore.add(l)
+              }
+
+              override fun onProviderEnabled(provider: String) {}
+
+              override fun onProviderDisabled(provider: String) {}
+
+              @Deprecated("Deprecated in Java")
+              override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+
+              override fun onDestroy() {
+                  lm?.removeUpdates(this)
+                  TrackStore.finish()
+                  TrackStore.save(filesDir)
+                  TrackStore.listener?.invoke()
+                  super.onDestroy()
+              }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/TrackStore.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.location.Location
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+          import java.util.TimeZone
+
+          data class Pt(val lat: Double, val lon: Double, val ele: Double?, val time: Long)
+
+          object TrackStore {
+              val points = ArrayList<Pt>()
+              var recording = false
+              var distance = 0.0
+              var ascent = 0.0
+              var lastSpeed = 0.0
+              var startTime = 0L
+              var endTime = 0L
+              var listener: (() -> Unit)? = null
+              private var lastEle: Double? = null
+
+              fun reset() {
+                  points.clear()
+                  distance = 0.0
+                  ascent = 0.0
+                  lastSpeed = 0.0
+                  lastEle = null
+                  startTime = System.currentTimeMillis()
+                  endTime = 0L
+                  recording = true
+              }
+
+              fun finish() {
+                  if (recording) {
+                      recording = false
+                      endTime = System.currentTimeMillis()
+                  }
+              }
+
+              fun add(l: Location) {
+                  val ele = if (l.hasAltitude()) l.altitude else null
+                  val p = Pt(l.latitude, l.longitude, ele, System.currentTimeMillis())
+                  if (points.isNotEmpty()) {
+                      val a = points[points.size - 1]
+                      val r = FloatArray(1)
+                      Location.distanceBetween(a.lat, a.lon, p.lat, p.lon, r)
+                      distance += r[0].toDouble()
+                  }
+                  if (ele != null) {
+                      val le = lastEle
+                      if (le == null) {
+                          lastEle = ele
+                      } else {
+                          val d = ele - le
+                          if (d >= 3.0) {
+                              ascent += d
+                              lastEle = ele
+                          } else if (d <= -3.0) {
+                              lastEle = ele
+                          }
+                      }
+                  }
+                  lastSpeed = if (l.hasSpeed()) l.speed.toDouble() else 0.0
+                  points.add(p)
+                  listener?.invoke()
+              }
+
+              fun elapsedSeconds(): Long {
+                  if (startTime == 0L) return 0L
+                  val end = if (recording) System.currentTimeMillis() else endTime
+                  return (end - startTime) / 1000
+              }
+
+              private fun iso(t: Long): String {
+                  val f = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                  f.timeZone = TimeZone.getTimeZone("UTC")
+                  return f.format(Date(t))
+              }
+
+              fun toGpx(name: String): String {
+                  val sb = StringBuilder()
+                  sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+                  sb.append("<gpx version=\"1.1\" creator=\"Sentiero\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
+                  sb.append("<trk><name>").append(name).append("</name><trkseg>\n")
+                  for (p in points) {
+                      sb.append("<trkpt lat=\"").append(p.lat).append("\" lon=\"").append(p.lon).append("\">")
+                      if (p.ele != null) sb.append("<ele>").append(p.ele).append("</ele>")
+                      sb.append("<time>").append(iso(p.time)).append("</time></trkpt>\n")
+                  }
+                  sb.append("</trkseg></trk>\n</gpx>\n")
+                  return sb.toString()
+              }
+
+              fun save(filesDir: File): File? {
+                  if (points.size < 2) return null
+                  val dir = File(filesDir, "tracks")
+                  dir.mkdirs()
+                  val stamp = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.ITALY).format(Date(startTime))
+                  val f = File(dir, "$stamp.gpx")
+                  f.writeText(toGpx("Uscita $stamp"))
+                  return f
+              }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/res/xml
+          cat > app/src/main/res/xml/file_paths.xml <<'SENTIERO_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <files-path name="tracks" path="tracks/" />
+          </paths>
+          SENTIERO_EOF
+          cat > build.gradle.kts <<'SENTIERO_EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          SENTIERO_EOF
+          cat > gradle.properties <<'SENTIERO_EOF'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          SENTIERO_EOF
+          cat > settings.gradle.kts <<'SENTIERO_EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "Sentiero"
+          include(":app")
+          SENTIERO_EOF
+      - name: Compila
+        run: gradle assembleDebug --no-daemon
+      - name: Pubblica l'APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Sentiero v${{ github.run_number }}
+          files: app/build/outputs/apk/debug/app-debug.apk
