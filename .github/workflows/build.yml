@@ -34,11 +34,23 @@ jobs:
                   applicationId = "it.sentiero.tracker"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  versionCode = 2
+                  versionName = "1.1"
+              }
+
+              signingConfigs {
+                  create("fixed") {
+                      storeFile = file("sentiero.jks")
+                      storePassword = "sentiero123"
+                      keyAlias = "sentiero"
+                      keyPassword = "sentiero123"
+                  }
               }
 
               buildTypes {
+                  getByName("debug") {
+                      signingConfig = signingConfigs.getByName("fixed")
+                  }
                   release {
                       isMinifyEnabled = false
                   }
@@ -56,6 +68,10 @@ jobs:
               implementation("org.osmdroid:osmdroid-android:6.1.18")
               implementation("androidx.core:core:1.13.1")
           }
+          SENTIERO_EOF
+          mkdir -p app
+          cat > app/sentiero.jks.b64 <<'SENTIERO_EOF'
+          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
           SENTIERO_EOF
           mkdir -p app/src/main
           cat > app/src/main/AndroidManifest.xml <<'SENTIERO_EOF'
@@ -131,6 +147,7 @@ jobs:
           import androidx.core.content.FileProvider
           import org.osmdroid.config.Configuration
           import org.osmdroid.events.MapEventsReceiver
+          import org.osmdroid.tileprovider.cachemanager.CacheManager
           import org.osmdroid.tileprovider.tilesource.TileSourceFactory
           import org.osmdroid.util.GeoPoint
           import org.osmdroid.views.MapView
@@ -154,6 +171,8 @@ jobs:
               private lateinit var tvUp: TextView
               private lateinit var btnRec: Button
               private lateinit var btnNav: Button
+              private lateinit var btnDl: Button
+              private var downloading = false
               private var me: MyLocationNewOverlay? = null
               private var destMarker: Marker? = null
               private var dest: GeoPoint? = null
@@ -197,6 +216,7 @@ jobs:
               private fun button(parent: LinearLayout, text: String): Button {
                   val b = Button(this)
                   b.text = text
+                  b.textSize = 14f
                   val lp = LinearLayout.LayoutParams(0, dp(52), 1f)
                   lp.setMargins(dp(4), dp(4), dp(4), dp(4))
                   parent.addView(b, lp)
@@ -208,8 +228,12 @@ jobs:
                   val cfg = Configuration.getInstance()
                   cfg.load(this, getSharedPreferences("osm", Context.MODE_PRIVATE))
                   cfg.userAgentValue = packageName
-                  cfg.osmdroidBasePath = File(cacheDir, "osm")
-                  cfg.osmdroidTileCache = File(cacheDir, "osm/tiles")
+                  val base = File(getExternalFilesDir(null) ?: filesDir, "osm")
+                  cfg.osmdroidBasePath = base
+                  cfg.osmdroidTileCache = File(base, "tiles")
+                  cfg.tileFileSystemCacheMaxBytes = 2000L * 1024L * 1024L
+                  cfg.tileFileSystemCacheTrimBytes = 1700L * 1024L * 1024L
+                  cfg.expirationOverrideDuration = 60L * 24L * 60L * 60L * 1000L
 
                   val root = LinearLayout(this)
                   root.orientation = LinearLayout.VERTICAL
@@ -249,7 +273,8 @@ jobs:
                   btnRec = button(r3, "REGISTRA")
                   btnNav = button(r3, "NAVIGA")
                   val r4 = row(panel)
-                  val btnList = button(r4, "LE MIE TRACCE")
+                  val btnList = button(r4, "TRACCE")
+                  btnDl = button(r4, "SCARICA")
                   val btnCenter = button(r4, "CENTRA")
                   root.addView(panel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                   setContentView(root)
@@ -260,6 +285,7 @@ jobs:
                   }
                   btnNav.setOnClickListener { navigate() }
                   btnList.setOnClickListener { showTracks() }
+                  btnDl.setOnClickListener { downloadArea() }
                   btnCenter.setOnClickListener {
                       val m = me
                       if (m != null) {
@@ -326,7 +352,7 @@ jobs:
                   stopService(Intent(this, TrackService::class.java))
                   window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                   handler.postDelayed({
-                      val msg = if (TrackStore.points.size >= 2) "Traccia salvata in LE MIE TRACCE" else "Traccia troppo corta, non salvata"
+                      val msg = if (TrackStore.points.size >= 2) "Traccia salvata in TRACCE" else "Traccia troppo corta, non salvata"
                       Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                       refresh()
                   }, 600L)
@@ -381,6 +407,50 @@ jobs:
                       drawnCount = s.points.size
                       map.invalidate()
                   }
+              }
+
+              private fun downloadArea() {
+                  if (downloading) return
+                  val z = map.zoomLevelDouble.toInt()
+                  if (z < 10) {
+                      Toast.makeText(this, "Avvicina la mappa (zoom piu stretto) per scaricare una zona", Toast.LENGTH_LONG).show()
+                      return
+                  }
+                  val bb = map.boundingBox
+                  val cm = CacheManager(map)
+                  var zmax = minOf(z + 3, 17)
+                  while (zmax > z && cm.possibleTilesInArea(bb, z, zmax) > 1500) zmax--
+                  val count = cm.possibleTilesInArea(bb, z, zmax)
+                  if (count > 1500) {
+                      Toast.makeText(this, "Zona troppo grande: avvicina la mappa", Toast.LENGTH_LONG).show()
+                      return
+                  }
+                  downloading = true
+                  btnDl.isEnabled = false
+                  Toast.makeText(this, "Scarico la zona visibile ($count tessere)", Toast.LENGTH_SHORT).show()
+                  cm.downloadAreaAsync(this, bb, z, zmax, object : CacheManager.CacheManagerCallback {
+                      override fun onTaskComplete() {
+                          downloading = false
+                          btnDl.isEnabled = true
+                          btnDl.text = "SCARICA"
+                          Toast.makeText(this@MainActivity, "Zona scaricata: disponibile offline", Toast.LENGTH_LONG).show()
+                      }
+
+                      override fun onTaskFailed(errors: Int) {
+                          downloading = false
+                          btnDl.isEnabled = true
+                          btnDl.text = "SCARICA"
+                          Toast.makeText(this@MainActivity, "Scaricamento incompleto ($errors errori)", Toast.LENGTH_LONG).show()
+                      }
+
+                      override fun updateProgress(progress: Int, currentZoomLevel: Int, zoomMin: Int, zoomMax: Int) {
+                          if (count > 0) btnDl.text = (progress * 100 / count).toString() + "%"
+                      }
+
+                      override fun downloadStarted() {}
+
+                      override fun setPossibleTilesInArea(total: Int) {}
+                  })
               }
 
               private fun showTracks() {
@@ -654,6 +724,7 @@ jobs:
           rootProject.name = "Sentiero"
           include(":app")
           SENTIERO_EOF
+          base64 -d app/sentiero.jks.b64 > app/sentiero.jks
       - name: Compila
         run: gradle assembleDebug --no-daemon
       - name: Pubblica l'APK
