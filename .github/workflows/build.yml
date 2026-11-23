@@ -34,8 +34,8 @@ jobs:
                   applicationId = "it.sentiero.tracker"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 2
-                  versionName = "1.1"
+                  versionCode = 5
+                  versionName = "1.4"
               }
 
               signingConfigs {
@@ -88,6 +88,8 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
               <application
@@ -107,6 +109,16 @@ jobs:
                       </intent-filter>
                   </activity>
 
+                  <activity
+                      android:name=".ChartActivity"
+                      android:exported="false"
+                      android:screenOrientation="portrait" />
+
+                  <activity
+                      android:name=".SettingsActivity"
+                      android:exported="false"
+                      android:screenOrientation="portrait" />
+
                   <service
                       android:name=".TrackService"
                       android:exported="false"
@@ -123,6 +135,491 @@ jobs:
                   </provider>
               </application>
           </manifest>
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/ChartActivity.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.app.Activity
+          import android.content.Context
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.os.Bundle
+          import android.view.ViewGroup
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import android.widget.Toast
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          class ChartActivity : Activity() {
+
+              private var data: TrackData? = null
+              private lateinit var readout: TextView
+              private var altChart: ChartView? = null
+              private lateinit var speedChart: ChartView
+              private lateinit var route: RouteView
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              private fun fmt(v: Double, d: Int): String = String.format(Locale.ITALY, "%." + d + "f", v)
+
+              private fun hms(sec: Long): String =
+                  String.format(Locale.ITALY, "%d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60)
+
+              private fun cell(parent: LinearLayout, label: String, value: String): TextView {
+                  val box = LinearLayout(this)
+                  box.orientation = LinearLayout.VERTICAL
+                  box.setPadding(dp(8), dp(6), dp(8), dp(6))
+                  val l = TextView(this)
+                  l.text = label
+                  l.textSize = 11f
+                  l.setTextColor(Color.GRAY)
+                  val v = TextView(this)
+                  v.text = value
+                  v.textSize = 20f
+                  v.setTextColor(Color.BLACK)
+                  v.typeface = Typeface.MONOSPACE
+                  box.addView(l)
+                  box.addView(v)
+                  parent.addView(box, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                  return v
+              }
+
+              private fun statRow(parent: LinearLayout): LinearLayout {
+                  val r = LinearLayout(this)
+                  r.orientation = LinearLayout.HORIZONTAL
+                  parent.addView(r, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  return r
+              }
+
+              private fun label(parent: LinearLayout, s: String) {
+                  val t = TextView(this)
+                  t.text = s
+                  t.textSize = 12f
+                  t.setTextColor(Color.GRAY)
+                  t.setPadding(dp(4), dp(14), 0, dp(2))
+                  parent.addView(t)
+              }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val path = intent.getStringExtra("path")
+                  val d = if (path == null) null else GpxReader.read(File(path))
+                  if (d == null) {
+                      Toast.makeText(this, "Impossibile leggere la traccia", Toast.LENGTH_LONG).show()
+                      finish()
+                      return
+                  }
+                  data = d
+
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setBackgroundColor(Color.WHITE)
+                  root.setPadding(dp(12), dp(24), dp(12), dp(16))
+
+                  val title = TextView(this)
+                  title.text = File(path!!).name.removeSuffix(".gpx")
+                  title.textSize = 22f
+                  title.typeface = Typeface.DEFAULT_BOLD
+                  title.setTextColor(Color.BLACK)
+                  root.addView(title)
+
+                  val hasTime = d.duration > 0L
+                  val r1 = statRow(root)
+                  cell(r1, "DISTANZA km", fmt(d.total / 1000.0, 2))
+                  cell(r1, "DURATA", if (hasTime) hms(d.duration) else "-")
+                  cell(r1, "IN MOVIMENTO", if (hasTime) hms(d.moving.toLong()) else "-")
+                  val r2 = statRow(root)
+                  cell(r2, "MEDIA km/h", if (d.moving > 5.0) fmt(d.total / d.moving * 3.6, 1) else "-")
+                  cell(r2, "MAX km/h", if (hasTime) fmt(d.maxSpeed, 1) else "-")
+                  cell(r2, "SALITA m", if (d.hasEle) fmt(d.ascent, 0) else "-")
+                  val r3 = statRow(root)
+                  cell(r3, "DISCESA m", if (d.hasEle) fmt(d.descent, 0) else "-")
+                  cell(r3, "QUOTA MAX m", if (d.hasEle) fmt(d.maxAlt, 0) else "-")
+                  cell(r3, "QUOTA MIN m", if (d.hasEle) fmt(d.minAlt, 0) else "-")
+
+                  readout = TextView(this)
+                  readout.textSize = 14f
+                  readout.typeface = Typeface.MONOSPACE
+                  readout.setTextColor(Color.rgb(25, 37, 27))
+                  readout.setBackgroundColor(Color.rgb(221, 230, 218))
+                  readout.setPadding(dp(10), dp(10), dp(10), dp(10))
+                  readout.text = "Tocca un grafico per leggere i dati di un punto."
+                  val rlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                  rlp.topMargin = dp(10)
+                  root.addView(readout, rlp)
+
+                  label(root, "PERCORSO")
+                  route = RouteView(this, d)
+                  root.addView(route, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230)))
+
+                  val xs = DoubleArray(d.n)
+                  for (i in 0 until d.n) xs[i] = d.dist[i] / 1000.0
+
+                  if (d.hasEle) {
+                      label(root, "PROFILO DI QUOTA (m)")
+                      val ac = ChartView(this, xs, d.alt, Color.rgb(182, 72, 26), false) { i -> setCursor(i) }
+                      altChart = ac
+                      root.addView(ac, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190)))
+                  }
+
+                  if (hasTime) {
+                      label(root, "VELOCITA (km/h)")
+                      speedChart = ChartView(this, xs, d.speed, Color.rgb(30, 111, 232), true) { i -> setCursor(i) }
+                      root.addView(speedChart, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190)))
+                  } else {
+                      speedChart = ChartView(this, xs, d.speed, Color.rgb(30, 111, 232), true) { i -> setCursor(i) }
+                  }
+
+                  val back = Button(this)
+                  back.text = "INDIETRO"
+                  back.setOnClickListener { finish() }
+                  val blp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
+                  blp.topMargin = dp(20)
+                  root.addView(back, blp)
+
+                  val scroll = ScrollView(this)
+                  scroll.setBackgroundColor(Color.WHITE)
+                  scroll.addView(root)
+                  setContentView(scroll)
+              }
+
+              private fun setCursor(i: Int) {
+                  val d = data ?: return
+                  altChart?.cursor = i
+                  altChart?.invalidate()
+                  speedChart.cursor = i
+                  speedChart.invalidate()
+                  route.cursor = i
+                  route.invalidate()
+                  val sb = StringBuilder()
+                  sb.append("km ").append(fmt(d.dist[i] / 1000.0, 2))
+                  if (d.hasEle) {
+                      sb.append("  quota ").append(fmt(d.alt[i], 0)).append(" m")
+                      val s = d.slopeAt(i)
+                      sb.append("  pend. ").append(if (s > 0) "+" else "").append(fmt(s, 1)).append("%")
+                  }
+                  if (d.duration > 0L) {
+                      sb.append("\nvel. ").append(fmt(d.speed[i], 1)).append(" km/h")
+                      sb.append("  ore ").append(SimpleDateFormat("HH:mm:ss", Locale.ITALY).format(Date(d.time[i])))
+                      sb.append("  da inizio ").append(hms((d.time[i] - d.time[0]) / 1000))
+                  }
+                  readout.text = sb.toString()
+              }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/ChartViews.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.content.Context
+          import android.graphics.Canvas
+          import android.graphics.Color
+          import android.graphics.Paint
+          import android.graphics.Path
+          import android.view.MotionEvent
+          import android.view.View
+          import java.util.Locale
+
+          class ChartView(
+              ctx: Context,
+              private val xs: DoubleArray,
+              private val ys: DoubleArray,
+              private val color: Int,
+              private val zeroBase: Boolean,
+              private val onPick: (Int) -> Unit
+          ) : View(ctx) {
+
+              var cursor = -1
+              private val line = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val fillP = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val grid = Paint()
+              private val text = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val cur = Paint(Paint.ANTI_ALIAS_FLAG)
+              private var left = 0f
+              private var pw = 1f
+
+              private fun dp(v: Float): Float = v * resources.displayMetrics.density
+
+              init {
+                  line.style = Paint.Style.STROKE
+                  line.strokeWidth = dp(2f)
+                  line.color = color
+                  line.strokeJoin = Paint.Join.ROUND
+                  fillP.style = Paint.Style.FILL
+                  fillP.color = color
+                  fillP.alpha = 55
+                  grid.color = Color.rgb(200, 210, 198)
+                  grid.strokeWidth = 1f
+                  text.color = Color.rgb(90, 105, 95)
+                  text.textSize = dp(11f)
+                  cur.style = Paint.Style.FILL
+                  cur.color = Color.rgb(25, 37, 27)
+              }
+
+              override fun onDraw(c: Canvas) {
+                  super.onDraw(c)
+                  val w = width.toFloat()
+                  val h = height.toFloat()
+                  left = dp(10f)
+                  val right = dp(10f)
+                  val top = dp(18f)
+                  val bottom = dp(24f)
+                  pw = w - left - right
+                  val ph = h - top - bottom
+                  if (pw <= 0f || ph <= 0f || xs.size < 2) return
+                  var mn = ys[0]
+                  var mx = ys[0]
+                  for (v in ys) {
+                      if (v < mn) mn = v
+                      if (v > mx) mx = v
+                  }
+                  if (zeroBase) mn = 0.0
+                  if (mx - mn < 1.0) mx = mn + 1.0
+                  val pad = (mx - mn) * 0.08
+                  if (!zeroBase) mn -= pad
+                  mx += pad
+                  val x0 = xs[0]
+                  val x1 = xs[xs.size - 1]
+                  val span = if (x1 - x0 > 0.0) x1 - x0 else 1.0
+                  val range = mx - mn
+
+                  for (k in 0..2) {
+                      val v = mx - range * k / 2.0
+                      val y = top + ((mx - v) / range * ph).toFloat()
+                      c.drawLine(left, y, left + pw, y, grid)
+                      c.drawText(String.format(Locale.ITALY, "%.0f", v), left + dp(2f), y - dp(3f), text)
+                  }
+
+                  val fillPath = Path()
+                  val linePath = Path()
+                  for (i in xs.indices) {
+                      val px = left + ((xs[i] - x0) / span * pw).toFloat()
+                      val py = top + ((mx - ys[i]) / range * ph).toFloat()
+                      if (i == 0) {
+                          fillPath.moveTo(px, top + ph)
+                          fillPath.lineTo(px, py)
+                          linePath.moveTo(px, py)
+                      } else {
+                          fillPath.lineTo(px, py)
+                          linePath.lineTo(px, py)
+                      }
+                  }
+                  fillPath.lineTo(left + pw, top + ph)
+                  fillPath.close()
+                  c.drawPath(fillPath, fillP)
+                  c.drawPath(linePath, line)
+
+                  c.drawText("0", left, h - dp(6f), text)
+                  val endLabel = String.format(Locale.ITALY, "%.1f km", x1)
+                  c.drawText(endLabel, left + pw - text.measureText(endLabel), h - dp(6f), text)
+
+                  if (cursor in xs.indices) {
+                      val px = left + ((xs[cursor] - x0) / span * pw).toFloat()
+                      val py = top + ((mx - ys[cursor]) / range * ph).toFloat()
+                      val cl = Paint()
+                      cl.color = Color.rgb(25, 37, 27)
+                      cl.strokeWidth = dp(1.5f)
+                      c.drawLine(px, top, px, top + ph, cl)
+                      c.drawCircle(px, py, dp(4.5f), cur)
+                  }
+              }
+
+              override fun onTouchEvent(e: MotionEvent): Boolean {
+                  parent?.requestDisallowInterceptTouchEvent(true)
+                  if (xs.size < 2 || pw <= 0f) return true
+                  val fx = ((e.x - left) / pw).coerceIn(0f, 1f)
+                  val x0 = xs[0]
+                  val x1 = xs[xs.size - 1]
+                  val target = x0 + fx * (x1 - x0)
+                  var lo = 0
+                  var hi = xs.size - 1
+                  while (lo < hi) {
+                      val mid = (lo + hi) / 2
+                      if (xs[mid] < target) lo = mid + 1 else hi = mid
+                  }
+                  onPick(lo)
+                  if (e.action == MotionEvent.ACTION_UP || e.action == MotionEvent.ACTION_CANCEL) {
+                      parent?.requestDisallowInterceptTouchEvent(false)
+                  }
+                  return true
+              }
+          }
+
+          class RouteView(ctx: Context, private val d: TrackData) : View(ctx) {
+
+              var cursor = -1
+              private val line = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val dotP = Paint(Paint.ANTI_ALIAS_FLAG)
+
+              private fun dp(v: Float): Float = v * resources.displayMetrics.density
+
+              override fun onDraw(c: Canvas) {
+                  super.onDraw(c)
+                  c.drawColor(Color.rgb(221, 230, 218))
+                  val w = width.toFloat()
+                  val h = height.toFloat()
+                  var minLat = d.lat[0]
+                  var maxLat = d.lat[0]
+                  var minLon = d.lon[0]
+                  var maxLon = d.lon[0]
+                  for (i in 0 until d.n) {
+                      if (d.lat[i] < minLat) minLat = d.lat[i]
+                      if (d.lat[i] > maxLat) maxLat = d.lat[i]
+                      if (d.lon[i] < minLon) minLon = d.lon[i]
+                      if (d.lon[i] > maxLon) maxLon = d.lon[i]
+                  }
+                  val k = Math.cos(Math.toRadians((minLat + maxLat) / 2.0))
+                  val wd = maxOf((maxLon - minLon) * k, 1e-6)
+                  val hd = maxOf(maxLat - minLat, 1e-6)
+                  val pad = dp(24f)
+                  val sc = minOf((w - 2 * pad) / wd, (h - 2 * pad) / hd).toFloat()
+                  val ox = (w - (wd * sc).toFloat()) / 2f
+                  val oy = (h - (hd * sc).toFloat()) / 2f
+                  val path = Path()
+                  for (i in 0 until d.n) {
+                      val px = ox + ((d.lon[i] - minLon) * k * sc).toFloat()
+                      val py = h - (oy + ((d.lat[i] - minLat) * sc).toFloat())
+                      if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                  }
+                  line.style = Paint.Style.STROKE
+                  line.strokeWidth = dp(4f)
+                  line.color = Color.rgb(240, 146, 74)
+                  line.strokeJoin = Paint.Join.ROUND
+                  line.strokeCap = Paint.Cap.ROUND
+                  c.drawPath(path, line)
+
+                  fun pt(i: Int, col: Int, r: Float) {
+                      val px = ox + ((d.lon[i] - minLon) * k * sc).toFloat()
+                      val py = h - (oy + ((d.lat[i] - minLat) * sc).toFloat())
+                      dotP.style = Paint.Style.FILL
+                      dotP.color = Color.WHITE
+                      c.drawCircle(px, py, r + dp(2f), dotP)
+                      dotP.color = col
+                      c.drawCircle(px, py, r, dotP)
+                  }
+                  pt(0, Color.rgb(45, 122, 76), dp(6f))
+                  pt(d.n - 1, Color.rgb(25, 37, 27), dp(6f))
+                  if (cursor in 0 until d.n) pt(cursor, Color.rgb(30, 111, 232), dp(7f))
+
+                  val north = Paint(Paint.ANTI_ALIAS_FLAG)
+                  north.color = Color.rgb(25, 37, 27)
+                  north.textSize = dp(13f)
+                  north.isFakeBoldText = true
+                  c.drawText("N", w - dp(22f), dp(20f), north)
+              }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/CursorIcons.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.content.Context
+          import android.graphics.Bitmap
+          import android.graphics.Canvas
+          import android.graphics.Color
+          import android.graphics.Paint
+          import android.graphics.Path
+          import android.graphics.RectF
+
+          object CursorIcons {
+              val names = arrayOf("Freccia blu", "Freccia rossa", "Punto blu", "Fuoristrada", "Moto fuoristrada")
+
+              private fun fill(color: Int): Paint {
+                  val p = Paint(Paint.ANTI_ALIAS_FLAG)
+                  p.style = Paint.Style.FILL
+                  p.color = color
+                  return p
+              }
+
+              private fun stroke(color: Int, w: Float): Paint {
+                  val p = Paint(Paint.ANTI_ALIAS_FLAG)
+                  p.style = Paint.Style.STROKE
+                  p.color = color
+                  p.strokeWidth = w
+                  p.strokeJoin = Paint.Join.ROUND
+                  p.strokeCap = Paint.Cap.ROUND
+                  return p
+              }
+
+              fun make(ctx: Context, id: Int, sizeDp: Int): Bitmap {
+                  val s = (sizeDp * ctx.resources.displayMetrics.density).toInt().coerceAtLeast(16)
+                  val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+                  val c = Canvas(bmp)
+                  val u = s / 100f
+                  c.scale(u, u)
+                  when (id) {
+                      0 -> arrow(c, Color.rgb(30, 111, 232))
+                      1 -> arrow(c, Color.rgb(229, 57, 53))
+                      2 -> dot(c)
+                      3 -> car(c)
+                      else -> bike(c)
+                  }
+                  return bmp
+              }
+
+              private fun arrow(c: Canvas, col: Int) {
+                  val path = Path()
+                  path.moveTo(50f, 6f)
+                  path.lineTo(82f, 90f)
+                  path.lineTo(50f, 72f)
+                  path.lineTo(18f, 90f)
+                  path.close()
+                  c.drawPath(path, stroke(Color.WHITE, 9f))
+                  c.drawPath(path, fill(col))
+              }
+
+              private fun dot(c: Canvas) {
+                  c.drawCircle(50f, 50f, 44f, fill(Color.argb(70, 30, 111, 232)))
+                  c.drawCircle(50f, 50f, 25f, fill(Color.WHITE))
+                  c.drawCircle(50f, 50f, 19f, fill(Color.rgb(30, 111, 232)))
+              }
+
+              private fun car(c: Canvas) {
+                  val dark = fill(Color.rgb(34, 34, 34))
+                  c.drawRoundRect(RectF(14f, 14f, 28f, 38f), 4f, 4f, dark)
+                  c.drawRoundRect(RectF(72f, 14f, 86f, 38f), 4f, 4f, dark)
+                  c.drawRoundRect(RectF(14f, 64f, 28f, 88f), 4f, 4f, dark)
+                  c.drawRoundRect(RectF(72f, 64f, 86f, 88f), 4f, 4f, dark)
+                  val body = RectF(25f, 6f, 75f, 94f)
+                  c.drawRoundRect(body, 12f, 12f, fill(Color.rgb(245, 124, 0)))
+                  c.drawRoundRect(body, 12f, 12f, stroke(Color.WHITE, 3f))
+                  val glass = fill(Color.rgb(38, 50, 56))
+                  val ws = Path()
+                  ws.moveTo(32f, 30f)
+                  ws.lineTo(68f, 30f)
+                  ws.lineTo(64f, 44f)
+                  ws.lineTo(36f, 44f)
+                  ws.close()
+                  c.drawPath(ws, glass)
+                  c.drawRoundRect(RectF(34f, 74f, 66f, 82f), 3f, 3f, glass)
+                  val rack = stroke(Color.rgb(250, 250, 250), 2.5f)
+                  c.drawRect(RectF(33f, 49f, 67f, 70f), rack)
+                  c.drawLine(50f, 49f, 50f, 70f, rack)
+                  c.drawCircle(34f, 12f, 3.2f, fill(Color.rgb(255, 235, 59)))
+                  c.drawCircle(66f, 12f, 3.2f, fill(Color.rgb(255, 235, 59)))
+              }
+
+              private fun bike(c: Canvas) {
+                  val dark = fill(Color.rgb(34, 34, 34))
+                  val orange = fill(Color.rgb(245, 124, 0))
+                  c.drawRoundRect(RectF(43f, 4f, 57f, 36f), 6f, 6f, dark)
+                  c.drawRoundRect(RectF(42f, 64f, 58f, 97f), 6f, 6f, dark)
+                  c.drawRoundRect(RectF(41f, 8f, 59f, 22f), 6f, 6f, orange)
+                  val body = RectF(37f, 30f, 63f, 74f)
+                  c.drawRoundRect(body, 12f, 12f, orange)
+                  c.drawRoundRect(body, 12f, 12f, stroke(Color.WHITE, 3f))
+                  c.drawRoundRect(RectF(41f, 52f, 59f, 72f), 6f, 6f, fill(Color.rgb(55, 71, 79)))
+                  c.drawLine(14f, 34f, 86f, 34f, stroke(Color.rgb(60, 60, 60), 7f))
+                  c.drawCircle(14f, 34f, 4.5f, dark)
+                  c.drawCircle(86f, 34f, 4.5f, dark)
+              }
+          }
           SENTIERO_EOF
           mkdir -p app/src/main/java/it/sentiero/tracker
           cat > app/src/main/java/it/sentiero/tracker/MainActivity.kt <<'SENTIERO_EOF'
@@ -281,6 +778,8 @@ jobs:
                   val btnList = button(r4, "TRACCE")
                   btnDl = button(r4, "SCARICA")
                   val btnCenter = button(r4, "CENTRA")
+                  val r5 = row(panel)
+                  val btnSet = button(r5, "IMPOSTAZIONI")
                   root.addView(panel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                   setContentView(root)
 
@@ -291,6 +790,7 @@ jobs:
                   btnNav.setOnClickListener { navigate() }
                   btnList.setOnClickListener { showTracks() }
                   btnDl.setOnClickListener { downloadArea() }
+                  btnSet.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
                   btnCenter.setOnClickListener {
                       val m = me
                       if (m != null) {
@@ -332,7 +832,28 @@ jobs:
                   o.enableFollowLocation()
                   map.overlays.add(o)
                   me = o
+                  applyCursor()
+              }
+
+              private fun applyCursor() {
+                  val o = me ?: return
+                  val id = getSharedPreferences("xplor3", Context.MODE_PRIVATE).getInt("cursor", 0)
+                  val bmp = CursorIcons.make(this, id, 44)
+                  o.setDirectionArrow(bmp, bmp)
+                  o.setPersonHotspot(bmp.width / 2f, bmp.height / 2f)
                   map.invalidate()
+              }
+
+              private fun askBattery() {
+                  try {
+                      val pm = getSystemService(android.os.PowerManager::class.java)
+                      if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                          val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                          i.data = Uri.parse("package:$packageName")
+                          startActivity(i)
+                      }
+                  } catch (e: Exception) {
+                  }
               }
 
               private fun startRec() {
@@ -345,6 +866,7 @@ jobs:
                       Toast.makeText(this, "Attiva la posizione (GPS) nelle impostazioni del telefono", Toast.LENGTH_LONG).show()
                       return
                   }
+                  askBattery()
                   TrackStore.reset()
                   drawnCount = -1
                   startForegroundService(Intent(this, TrackService::class.java))
@@ -476,10 +998,31 @@ jobs:
               }
 
               private fun trackActions(f: File) {
+                  val items = arrayOf("Grafico e dati", "Condividi GPX", "Elimina")
                   AlertDialog.Builder(this)
                       .setTitle(f.name.removeSuffix(".gpx"))
-                      .setPositiveButton("Condividi") { _, _ -> share(f) }
-                      .setNeutralButton("Elimina") { _, _ ->
+                      .setItems(items) { _, which ->
+                          when (which) {
+                              0 -> openChart(f)
+                              1 -> share(f)
+                              else -> confirmDelete(f)
+                          }
+                      }
+                      .setNegativeButton("Annulla", null)
+                      .show()
+              }
+
+              private fun openChart(f: File) {
+                  val i = Intent(this, ChartActivity::class.java)
+                  i.putExtra("path", f.absolutePath)
+                  startActivity(i)
+              }
+
+              private fun confirmDelete(f: File) {
+                  AlertDialog.Builder(this)
+                      .setTitle("Eliminare la traccia?")
+                      .setMessage(f.name.removeSuffix(".gpx"))
+                      .setPositiveButton("Elimina") { _, _ ->
                           f.delete()
                           Toast.makeText(this, "Traccia eliminata", Toast.LENGTH_SHORT).show()
                       }
@@ -499,6 +1042,7 @@ jobs:
               override fun onResume() {
                   super.onResume()
                   map.onResume()
+                  applyCursor()
                   drawnCount = -1
                   handler.post(tick)
               }
@@ -507,6 +1051,271 @@ jobs:
                   handler.removeCallbacks(tick)
                   map.onPause()
                   super.onPause()
+              }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/SettingsActivity.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.app.Activity
+          import android.content.Context
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.os.Bundle
+          import android.view.Gravity
+          import android.view.ViewGroup
+          import android.widget.Button
+          import android.widget.ImageView
+          import android.widget.LinearLayout
+          import android.widget.RadioButton
+          import android.widget.ScrollView
+          import android.widget.TextView
+
+          class SettingsActivity : Activity() {
+
+              private val radios = ArrayList<RadioButton>()
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val prefs = getSharedPreferences("xplor3", Context.MODE_PRIVATE)
+                  val sel = prefs.getInt("cursor", 0)
+
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setBackgroundColor(Color.WHITE)
+                  root.setPadding(dp(16), dp(28), dp(16), dp(20))
+
+                  val title = TextView(this)
+                  title.text = "Impostazioni"
+                  title.textSize = 26f
+                  title.typeface = Typeface.DEFAULT_BOLD
+                  title.setTextColor(Color.BLACK)
+                  root.addView(title)
+
+                  val sub = TextView(this)
+                  sub.text = "Cursore sulla mappa"
+                  sub.textSize = 16f
+                  sub.setTextColor(Color.GRAY)
+                  sub.setPadding(0, dp(16), 0, dp(8))
+                  root.addView(sub)
+
+                  for (i in CursorIcons.names.indices) {
+                      val row = LinearLayout(this)
+                      row.orientation = LinearLayout.HORIZONTAL
+                      row.gravity = Gravity.CENTER_VERTICAL
+                      row.setPadding(dp(4), dp(8), dp(4), dp(8))
+
+                      val rb = RadioButton(this)
+                      rb.isChecked = (i == sel)
+                      rb.isClickable = false
+                      rb.isFocusable = false
+                      radios.add(rb)
+
+                      val img = ImageView(this)
+                      img.setImageBitmap(CursorIcons.make(this, i, 44))
+                      img.setBackgroundColor(Color.rgb(221, 230, 218))
+                      val ilp = LinearLayout.LayoutParams(dp(56), dp(56))
+                      ilp.setMargins(dp(8), 0, dp(16), 0)
+
+                      val tv = TextView(this)
+                      tv.text = CursorIcons.names[i]
+                      tv.textSize = 18f
+                      tv.setTextColor(Color.BLACK)
+
+                      row.addView(rb)
+                      row.addView(img, ilp)
+                      row.addView(tv)
+                      row.setOnClickListener {
+                          prefs.edit().putInt("cursor", i).apply()
+                          for (k in radios.indices) radios[k].isChecked = (k == i)
+                      }
+                      root.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  }
+
+                  val back = Button(this)
+                  back.text = "INDIETRO"
+                  back.setOnClickListener { finish() }
+                  val blp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
+                  blp.topMargin = dp(20)
+                  root.addView(back, blp)
+
+                  val scroll = ScrollView(this)
+                  scroll.setBackgroundColor(Color.WHITE)
+                  scroll.addView(root)
+                  setContentView(scroll)
+              }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/TrackData.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.location.Location
+          import android.util.Xml
+          import org.xmlpull.v1.XmlPullParser
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Locale
+          import java.util.TimeZone
+
+          class TrackData(val lat: DoubleArray, val lon: DoubleArray, ele: DoubleArray, val time: LongArray) {
+              val n: Int = lat.size
+              val dist = DoubleArray(n)
+              val alt = DoubleArray(n)
+              val speed = DoubleArray(n)
+              var hasEle = false
+              var ascent = 0.0
+              var descent = 0.0
+              var minAlt = 0.0
+              var maxAlt = 0.0
+              var maxSpeed = 0.0
+              var duration = 0L
+              var moving = 0.0
+
+              val total: Double
+                  get() = dist[n - 1]
+
+              init {
+                  val r = FloatArray(1)
+                  for (i in 1 until n) {
+                      Location.distanceBetween(lat[i - 1], lon[i - 1], lat[i], lon[i], r)
+                      dist[i] = dist[i - 1] + r[0].toDouble()
+                  }
+                  var any = false
+                  for (v in ele) {
+                      if (!v.isNaN()) any = true
+                  }
+                  hasEle = any
+                  if (any) {
+                      val filled = DoubleArray(n)
+                      var last = Double.NaN
+                      for (i in 0 until n) {
+                          if (!ele[i].isNaN()) last = ele[i]
+                          filled[i] = last
+                      }
+                      var first = 0.0
+                      for (i in 0 until n) {
+                          if (!filled[i].isNaN()) {
+                              first = filled[i]
+                              break
+                          }
+                      }
+                      for (i in 0 until n) {
+                          if (filled[i].isNaN()) filled[i] = first
+                      }
+                      for (i in 0 until n) {
+                          val a = maxOf(0, i - 2)
+                          val b = minOf(n - 1, i + 2)
+                          var s = 0.0
+                          for (j in a..b) s += filled[j]
+                          alt[i] = s / (b - a + 1)
+                      }
+                      minAlt = alt[0]
+                      maxAlt = alt[0]
+                      var ref = alt[0]
+                      for (i in 0 until n) {
+                          if (alt[i] < minAlt) minAlt = alt[i]
+                          if (alt[i] > maxAlt) maxAlt = alt[i]
+                          val d = alt[i] - ref
+                          if (d >= 3.0) {
+                              ascent += d
+                              ref = alt[i]
+                          } else if (d <= -3.0) {
+                              descent -= d
+                              ref = alt[i]
+                          }
+                      }
+                  }
+                  for (i in 0 until n) {
+                      val a = maxOf(0, i - 3)
+                      val b = minOf(n - 1, i + 3)
+                      val dt = (time[b] - time[a]) / 1000.0
+                      speed[i] = if (dt > 0.5) (dist[b] - dist[a]) / dt * 3.6 else 0.0
+                      if (speed[i] > maxSpeed) maxSpeed = speed[i]
+                  }
+                  duration = (time[n - 1] - time[0]) / 1000
+                  for (i in 1 until n) {
+                      val dt = (time[i] - time[i - 1]) / 1000.0
+                      if (dt > 0.0 && dt < 60.0) {
+                          val v = (dist[i] - dist[i - 1]) / dt * 3.6
+                          if (v > 1.0) moving += dt
+                      }
+                  }
+              }
+
+              fun slopeAt(i: Int): Double {
+                  if (!hasEle) return 0.0
+                  val a = maxOf(0, i - 4)
+                  val b = minOf(n - 1, i + 4)
+                  val d = dist[b] - dist[a]
+                  return if (d > 5.0) (alt[b] - alt[a]) / d * 100.0 else 0.0
+              }
+          }
+
+          object GpxReader {
+              fun read(f: File): TrackData? {
+                  val la = ArrayList<Double>()
+                  val lo = ArrayList<Double>()
+                  val el = ArrayList<Double>()
+                  val tm = ArrayList<Long>()
+                  val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                  fmt.timeZone = TimeZone.getTimeZone("UTC")
+                  val parser = Xml.newPullParser()
+                  val stream = f.inputStream()
+                  try {
+                      parser.setInput(stream, "UTF-8")
+                      var curLat = 0.0
+                      var curLon = 0.0
+                      var curEle = Double.NaN
+                      var curTime = 0L
+                      var inPt = false
+                      var tag = ""
+                      var ev = parser.eventType
+                      while (ev != XmlPullParser.END_DOCUMENT) {
+                          if (ev == XmlPullParser.START_TAG) {
+                              tag = parser.name
+                              if (tag == "trkpt") {
+                                  inPt = true
+                                  curLat = parser.getAttributeValue(null, "lat")?.toDoubleOrNull() ?: 0.0
+                                  curLon = parser.getAttributeValue(null, "lon")?.toDoubleOrNull() ?: 0.0
+                                  curEle = Double.NaN
+                                  curTime = 0L
+                              }
+                          } else if (ev == XmlPullParser.TEXT) {
+                              if (inPt) {
+                                  val t = parser.text.trim()
+                                  if (tag == "ele") {
+                                      curEle = t.toDoubleOrNull() ?: Double.NaN
+                                  } else if (tag == "time") {
+                                      try {
+                                          curTime = fmt.parse(t)?.time ?: 0L
+                                      } catch (e: Exception) {
+                                          curTime = 0L
+                                      }
+                                  }
+                              }
+                          } else if (ev == XmlPullParser.END_TAG) {
+                              if (parser.name == "trkpt") {
+                                  la.add(curLat)
+                                  lo.add(curLon)
+                                  el.add(curEle)
+                                  tm.add(curTime)
+                                  inPt = false
+                              }
+                              tag = ""
+                          }
+                          ev = parser.next()
+                      }
+                  } catch (e: Exception) {
+                      return null
+                  } finally {
+                      stream.close()
+                  }
+                  if (la.size < 2) return null
+                  return TrackData(la.toDoubleArray(), lo.toDoubleArray(), el.toDoubleArray(), tm.toLongArray())
               }
           }
           SENTIERO_EOF
@@ -527,10 +1336,13 @@ jobs:
           import android.os.Build
           import android.os.Bundle
           import android.os.IBinder
+          import android.os.PowerManager
 
           class TrackService : Service(), LocationListener {
 
               private var lm: LocationManager? = null
+              private var wl: PowerManager.WakeLock? = null
+              private var count = 0
 
               override fun onBind(intent: Intent?): IBinder? = null
 
@@ -554,6 +1366,12 @@ jobs:
                   } else {
                       startForeground(1, n)
                   }
+                  if (wl == null) {
+                      val pm = getSystemService(PowerManager::class.java)
+                      val w = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "xplor3:rec")
+                      w.acquire(12 * 60 * 60 * 1000L)
+                      wl = w
+                  }
                   val m = getSystemService(LocationManager::class.java)
                   lm = m
                   try {
@@ -567,6 +1385,13 @@ jobs:
               override fun onLocationChanged(l: Location) {
                   if (l.hasAccuracy() && l.accuracy > 40f) return
                   TrackStore.add(l)
+                  count++
+                  if (count % 20 == 0) {
+                      try {
+                          TrackStore.save(filesDir)
+                      } catch (e: Exception) {
+                      }
+                  }
               }
 
               override fun onProviderEnabled(provider: String) {}
@@ -578,6 +1403,10 @@ jobs:
 
               override fun onDestroy() {
                   lm?.removeUpdates(this)
+                  try {
+                      wl?.release()
+                  } catch (e: Exception) {
+                  }
                   TrackStore.finish()
                   TrackStore.save(filesDir)
                   TrackStore.listener?.invoke()
@@ -761,4 +1590,3 @@ jobs:
           tag_name: v${{ github.run_number }}
           name: Xplor3 v${{ github.run_number }}
           files: app/build/outputs/apk/debug/app-debug.apk
-
