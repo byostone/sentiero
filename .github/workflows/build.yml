@@ -34,8 +34,8 @@ jobs:
                   applicationId = "it.sentiero.tracker"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 5
-                  versionName = "1.4"
+                  versionCode = 6
+                  versionName = "1.5"
               }
 
               signingConfigs {
@@ -142,6 +142,7 @@ jobs:
 
           import android.app.Activity
           import android.content.Context
+          import android.content.Intent
           import android.graphics.Color
           import android.graphics.Typeface
           import android.os.Bundle
@@ -178,11 +179,11 @@ jobs:
                   val l = TextView(this)
                   l.text = label
                   l.textSize = 11f
-                  l.setTextColor(Color.GRAY)
+                  l.setTextColor(Theme.sub(this))
                   val v = TextView(this)
                   v.text = value
                   v.textSize = 20f
-                  v.setTextColor(Color.BLACK)
+                  v.setTextColor(Theme.fg(this))
                   v.typeface = Typeface.MONOSPACE
                   box.addView(l)
                   box.addView(v)
@@ -201,7 +202,7 @@ jobs:
                   val t = TextView(this)
                   t.text = s
                   t.textSize = 12f
-                  t.setTextColor(Color.GRAY)
+                  t.setTextColor(Theme.sub(this))
                   t.setPadding(dp(4), dp(14), 0, dp(2))
                   parent.addView(t)
               }
@@ -217,16 +218,17 @@ jobs:
                   }
                   data = d
 
+                  Theme.style(this)
                   val root = LinearLayout(this)
                   root.orientation = LinearLayout.VERTICAL
-                  root.setBackgroundColor(Color.WHITE)
+                  root.setBackgroundColor(Theme.bg(this))
                   root.setPadding(dp(12), dp(24), dp(12), dp(16))
 
                   val title = TextView(this)
                   title.text = File(path!!).name.removeSuffix(".gpx")
                   title.textSize = 22f
                   title.typeface = Typeface.DEFAULT_BOLD
-                  title.setTextColor(Color.BLACK)
+                  title.setTextColor(Theme.fg(this))
                   root.addView(title)
 
                   val hasTime = d.duration > 0L
@@ -246,8 +248,8 @@ jobs:
                   readout = TextView(this)
                   readout.textSize = 14f
                   readout.typeface = Typeface.MONOSPACE
-                  readout.setTextColor(Color.rgb(25, 37, 27))
-                  readout.setBackgroundColor(Color.rgb(221, 230, 218))
+                  readout.setTextColor(Theme.fg(this))
+                  readout.setBackgroundColor(Theme.card(this))
                   readout.setPadding(dp(10), dp(10), dp(10), dp(10))
                   readout.text = "Tocca un grafico per leggere i dati di un punto."
                   val rlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -263,28 +265,43 @@ jobs:
 
                   if (d.hasEle) {
                       label(root, "PROFILO DI QUOTA (m)")
-                      val ac = ChartView(this, xs, d.alt, Color.rgb(182, 72, 26), false) { i -> setCursor(i) }
+                      val ac = ChartView(this, xs, d.alt, Theme.orange(this), false) { i -> setCursor(i) }
                       altChart = ac
                       root.addView(ac, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190)))
                   }
 
                   if (hasTime) {
                       label(root, "VELOCITA (km/h)")
-                      speedChart = ChartView(this, xs, d.speed, Color.rgb(30, 111, 232), true) { i -> setCursor(i) }
+                      speedChart = ChartView(this, xs, d.speed, Theme.blue(this), true) { i -> setCursor(i) }
                       root.addView(speedChart, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190)))
                   } else {
-                      speedChart = ChartView(this, xs, d.speed, Color.rgb(30, 111, 232), true) { i -> setCursor(i) }
+                      speedChart = ChartView(this, xs, d.speed, Theme.blue(this), true) { i -> setCursor(i) }
                   }
+
+                  val showMap = Button(this)
+                  showMap.text = "MOSTRA SULLA MAPPA"
+                  Theme.button(showMap)
+                  showMap.setOnClickListener {
+                      val i = Intent(this, MainActivity::class.java)
+                      i.putExtra("show", path)
+                      i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                      startActivity(i)
+                      finish()
+                  }
+                  val mlp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
+                  mlp.topMargin = dp(20)
+                  root.addView(showMap, mlp)
 
                   val back = Button(this)
                   back.text = "INDIETRO"
+                  Theme.button(back)
                   back.setOnClickListener { finish() }
                   val blp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
-                  blp.topMargin = dp(20)
+                  blp.topMargin = dp(8)
                   root.addView(back, blp)
 
                   val scroll = ScrollView(this)
-                  scroll.setBackgroundColor(Color.WHITE)
+                  scroll.setBackgroundColor(Theme.bg(this))
                   scroll.addView(root)
                   setContentView(scroll)
               }
@@ -354,12 +371,13 @@ jobs:
                   fillP.style = Paint.Style.FILL
                   fillP.color = color
                   fillP.alpha = 55
-                  grid.color = Color.rgb(200, 210, 198)
+                  val dk = Theme.dark(ctx)
+                  grid.color = if (dk) Color.rgb(50, 62, 54) else Color.rgb(200, 210, 198)
                   grid.strokeWidth = 1f
-                  text.color = Color.rgb(90, 105, 95)
+                  text.color = if (dk) Color.rgb(160, 172, 164) else Color.rgb(90, 105, 95)
                   text.textSize = dp(11f)
                   cur.style = Paint.Style.FILL
-                  cur.color = Color.rgb(25, 37, 27)
+                  cur.color = Theme.fg(ctx)
               }
 
               override fun onDraw(c: Canvas) {
@@ -423,7 +441,7 @@ jobs:
                       val px = left + ((xs[cursor] - x0) / span * pw).toFloat()
                       val py = top + ((mx - ys[cursor]) / range * ph).toFloat()
                       val cl = Paint()
-                      cl.color = Color.rgb(25, 37, 27)
+                      cl.color = Theme.fg(context)
                       cl.strokeWidth = dp(1.5f)
                       c.drawLine(px, top, px, top + ph, cl)
                       c.drawCircle(px, py, dp(4.5f), cur)
@@ -461,7 +479,7 @@ jobs:
 
               override fun onDraw(c: Canvas) {
                   super.onDraw(c)
-                  c.drawColor(Color.rgb(221, 230, 218))
+                  c.drawColor(Theme.card(context))
                   val w = width.toFloat()
                   val h = height.toFloat()
                   var minLat = d.lat[0]
@@ -504,11 +522,11 @@ jobs:
                       c.drawCircle(px, py, r, dotP)
                   }
                   pt(0, Color.rgb(45, 122, 76), dp(6f))
-                  pt(d.n - 1, Color.rgb(25, 37, 27), dp(6f))
-                  if (cursor in 0 until d.n) pt(cursor, Color.rgb(30, 111, 232), dp(7f))
+                  pt(d.n - 1, Theme.fg(context), dp(6f))
+                  if (cursor in 0 until d.n) pt(cursor, Theme.blue(context), dp(7f))
 
                   val north = Paint(Paint.ANTI_ALIAS_FLAG)
-                  north.color = Color.rgb(25, 37, 27)
+                  north.color = Theme.fg(context)
                   north.textSize = dp(13f)
                   north.isFakeBoldText = true
                   c.drawText("N", w - dp(22f), dp(20f), north)
@@ -656,6 +674,8 @@ jobs:
           import org.osmdroid.views.overlay.MapEventsOverlay
           import org.osmdroid.views.overlay.Marker
           import org.osmdroid.views.overlay.Polyline
+          import org.osmdroid.views.overlay.TilesOverlay
+          import org.osmdroid.util.BoundingBox
           import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
           import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
           import java.io.File
@@ -675,6 +695,8 @@ jobs:
               private lateinit var btnNav: Button
               private lateinit var btnDl: Button
               private var downloading = false
+              private var appliedDark = false
+              private val shownItems = ArrayList<org.osmdroid.views.overlay.Overlay>()
               private var me: MyLocationNewOverlay? = null
               private var destMarker: Marker? = null
               private var dest: GeoPoint? = null
@@ -696,11 +718,11 @@ jobs:
                   val l = TextView(this)
                   l.text = label
                   l.textSize = 11f
-                  l.setTextColor(Color.GRAY)
+                  l.setTextColor(Theme.sub(this))
                   val v = TextView(this)
                   v.text = "-"
                   v.textSize = 22f
-                  v.setTextColor(Color.BLACK)
+                  v.setTextColor(Theme.fg(this))
                   v.typeface = Typeface.MONOSPACE
                   box.addView(l)
                   box.addView(v)
@@ -719,6 +741,7 @@ jobs:
                   val b = Button(this)
                   b.text = text
                   b.textSize = 14f
+                  Theme.button(b)
                   val lp = LinearLayout.LayoutParams(0, dp(52), 1f)
                   lp.setMargins(dp(4), dp(4), dp(4), dp(4))
                   parent.addView(b, lp)
@@ -739,11 +762,15 @@ jobs:
 
                   val root = LinearLayout(this)
                   root.orientation = LinearLayout.VERTICAL
-                  root.setBackgroundColor(Color.WHITE)
+                  root.setBackgroundColor(Theme.bg(this))
+                  Theme.style(this)
+                  appliedDark = Theme.dark(this)
 
                   map = MapView(this)
                   map.setTileSource(TileSourceFactory.MAPNIK)
                   map.setMultiTouchControls(true)
+                  map.setUseDataConnection(!Theme.offline(this))
+                  if (appliedDark) map.overlayManager.tilesOverlay.setColorFilter(TilesOverlay.INVERT_COLORS)
                   map.controller.setZoom(16.0)
                   map.controller.setCenter(GeoPoint(43.8650, 11.2750))
                   root.addView(map, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -763,6 +790,7 @@ jobs:
                   val panel = LinearLayout(this)
                   panel.orientation = LinearLayout.VERTICAL
                   panel.setPadding(dp(8), dp(6), dp(8), dp(8))
+                  panel.setBackgroundColor(Theme.bg(this))
                   val r1 = row(panel)
                   tvDist = cell(r1, "DISTANZA km")
                   tvTime = cell(r1, "TEMPO")
@@ -984,32 +1012,108 @@ jobs:
                   val dir = File(filesDir, "tracks")
                   val files = (dir.listFiles() ?: arrayOf<File>())
                       .filter { it.name.endsWith(".gpx") }
-                      .sortedByDescending { it.name }
+                      .sortedByDescending { it.lastModified() }
                   if (files.isEmpty()) {
                       Toast.makeText(this, "Nessuna traccia salvata", Toast.LENGTH_SHORT).show()
                       return
                   }
                   val names = files.map { it.name.removeSuffix(".gpx") + "  (" + (it.length() / 1024 + 1) + " KB)" }.toTypedArray()
-                  AlertDialog.Builder(this)
+                  Theme.dialog(this)
                       .setTitle("Le mie tracce")
                       .setItems(names) { _, i -> trackActions(files[i]) }
                       .setNegativeButton("Chiudi", null)
+                      .also { if (shownItems.isNotEmpty()) it.setNeutralButton("Nascondi traccia") { _, _ -> clearShown() } }
                       .show()
               }
 
               private fun trackActions(f: File) {
-                  val items = arrayOf("Grafico e dati", "Condividi GPX", "Elimina")
-                  AlertDialog.Builder(this)
+                  val items = arrayOf("Mostra sulla mappa", "Grafico e dati", "Rinomina", "Condividi GPX", "Elimina")
+                  Theme.dialog(this)
                       .setTitle(f.name.removeSuffix(".gpx"))
                       .setItems(items) { _, which ->
                           when (which) {
-                              0 -> openChart(f)
-                              1 -> share(f)
+                              0 -> showTrack(f)
+                              1 -> openChart(f)
+                              2 -> renameTrack(f)
+                              3 -> share(f)
                               else -> confirmDelete(f)
                           }
                       }
                       .setNegativeButton("Annulla", null)
                       .show()
+              }
+
+              private fun renameTrack(f: File) {
+                  val et = android.widget.EditText(this)
+                  et.setText(f.name.removeSuffix(".gpx"))
+                  et.setSingleLine(true)
+                  et.setSelection(et.text.length)
+                  Theme.dialog(this)
+                      .setTitle("Rinomina traccia")
+                      .setView(et)
+                      .setPositiveButton("Salva") { _, _ ->
+                          val n = et.text.toString().replace(Regex("[\\\\/:*?\"<>|]"), "").trim()
+                          if (n.isEmpty()) {
+                              Toast.makeText(this, "Nome non valido", Toast.LENGTH_SHORT).show()
+                          } else {
+                              val t = File(f.parentFile, "$n.gpx")
+                              if (t.exists() && t.absolutePath != f.absolutePath) {
+                                  Toast.makeText(this, "Esiste gia una traccia con questo nome", Toast.LENGTH_LONG).show()
+                              } else if (f.renameTo(t)) {
+                                  Toast.makeText(this, "Traccia rinominata", Toast.LENGTH_SHORT).show()
+                              } else {
+                                  Toast.makeText(this, "Impossibile rinominare", Toast.LENGTH_LONG).show()
+                              }
+                          }
+                      }
+                      .setNegativeButton("Annulla", null)
+                      .show()
+              }
+
+              private fun clearShown() {
+                  for (o in shownItems) map.overlays.remove(o)
+                  shownItems.clear()
+                  map.invalidate()
+              }
+
+              private fun showTrack(f: File) {
+                  val d = GpxReader.read(f)
+                  if (d == null) {
+                      Toast.makeText(this, "Impossibile leggere la traccia", Toast.LENGTH_LONG).show()
+                      return
+                  }
+                  clearShown()
+                  val gp = ArrayList<GeoPoint>(d.n)
+                  for (i in 0 until d.n) gp.add(GeoPoint(d.lat[i], d.lon[i]))
+                  val pl = Polyline()
+                  pl.outlinePaint.color = Theme.blue(this)
+                  pl.outlinePaint.strokeWidth = 11f
+                  pl.setPoints(gp)
+                  val ms = Marker(map)
+                  ms.position = gp[0]
+                  ms.title = "Partenza"
+                  ms.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                  val me2 = Marker(map)
+                  me2.position = gp[gp.size - 1]
+                  me2.title = "Arrivo"
+                  me2.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                  map.overlays.add(1, pl)
+                  map.overlays.add(ms)
+                  map.overlays.add(me2)
+                  shownItems.add(pl)
+                  shownItems.add(ms)
+                  shownItems.add(me2)
+                  me?.disableFollowLocation()
+                  val bb = BoundingBox.fromGeoPoints(gp)
+                  map.post { map.zoomToBoundingBox(bb, true, dp(48)) }
+                  map.invalidate()
+                  Toast.makeText(this, "Traccia sulla mappa. La nascondi da TRACCE.", Toast.LENGTH_LONG).show()
+              }
+
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  val p = intent.getStringExtra("show")
+                  if (p != null) showTrack(File(p))
               }
 
               private fun openChart(f: File) {
@@ -1019,7 +1123,7 @@ jobs:
               }
 
               private fun confirmDelete(f: File) {
-                  AlertDialog.Builder(this)
+                  Theme.dialog(this)
                       .setTitle("Eliminare la traccia?")
                       .setMessage(f.name.removeSuffix(".gpx"))
                       .setPositiveButton("Elimina") { _, _ ->
@@ -1041,6 +1145,11 @@ jobs:
 
               override fun onResume() {
                   super.onResume()
+                  if (Theme.dark(this) != appliedDark) {
+                      recreate()
+                      return
+                  }
+                  map.setUseDataConnection(!Theme.offline(this))
                   map.onResume()
                   applyCursor()
                   drawnCount = -1
@@ -1070,11 +1179,21 @@ jobs:
           import android.widget.LinearLayout
           import android.widget.RadioButton
           import android.widget.ScrollView
+          import android.widget.Switch
           import android.widget.TextView
+          import java.io.File
 
           class SettingsActivity : Activity() {
 
               private val radios = ArrayList<RadioButton>()
+
+              private fun dirSize(f: File): Long {
+                  if (f.isFile) return f.length()
+                  var t = 0L
+                  val l = f.listFiles() ?: return 0L
+                  for (c in l) t += dirSize(c)
+                  return t
+              }
 
               private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -1083,22 +1202,58 @@ jobs:
                   val prefs = getSharedPreferences("xplor3", Context.MODE_PRIVATE)
                   val sel = prefs.getInt("cursor", 0)
 
+                  Theme.style(this)
                   val root = LinearLayout(this)
                   root.orientation = LinearLayout.VERTICAL
-                  root.setBackgroundColor(Color.WHITE)
+                  root.setBackgroundColor(Theme.bg(this))
                   root.setPadding(dp(16), dp(28), dp(16), dp(20))
 
                   val title = TextView(this)
                   title.text = "Impostazioni"
                   title.textSize = 26f
                   title.typeface = Typeface.DEFAULT_BOLD
-                  title.setTextColor(Color.BLACK)
+                  title.setTextColor(Theme.fg(this))
                   root.addView(title)
+
+                  val sec = TextView(this)
+                  sec.text = "Aspetto e mappe"
+                  sec.textSize = 16f
+                  sec.setTextColor(Theme.sub(this))
+                  sec.setPadding(0, dp(16), 0, dp(4))
+                  root.addView(sec)
+
+                  val swDark = Switch(this)
+                  swDark.text = "Tema scuro (nero, risparmia batteria)"
+                  swDark.textSize = 17f
+                  swDark.setTextColor(Theme.fg(this))
+                  swDark.isChecked = prefs.getBoolean("dark", false)
+                  swDark.setPadding(0, dp(10), 0, dp(10))
+                  swDark.setOnCheckedChangeListener { _, c ->
+                      prefs.edit().putBoolean("dark", c).apply()
+                      recreate()
+                  }
+                  root.addView(swDark)
+
+                  val swOff = Switch(this)
+                  swOff.text = "Solo offline (usa solo le mappe scaricate)"
+                  swOff.textSize = 17f
+                  swOff.setTextColor(Theme.fg(this))
+                  swOff.isChecked = prefs.getBoolean("offline", false)
+                  swOff.setPadding(0, dp(10), 0, dp(10))
+                  swOff.setOnCheckedChangeListener { _, c -> prefs.edit().putBoolean("offline", c).apply() }
+                  root.addView(swOff)
+
+                  val cache = TextView(this)
+                  val mb = dirSize(File(getExternalFilesDir(null) ?: filesDir, "osm")) / (1024 * 1024)
+                  cache.text = "Mappe salvate sul telefono: " + mb + " MB. Per scaricarne altre usa SCARICA nella schermata principale, con la mappa sulla zona che ti serve."
+                  cache.textSize = 13f
+                  cache.setTextColor(Theme.sub(this))
+                  root.addView(cache)
 
                   val sub = TextView(this)
                   sub.text = "Cursore sulla mappa"
                   sub.textSize = 16f
-                  sub.setTextColor(Color.GRAY)
+                  sub.setTextColor(Theme.sub(this))
                   sub.setPadding(0, dp(16), 0, dp(8))
                   root.addView(sub)
 
@@ -1116,14 +1271,14 @@ jobs:
 
                       val img = ImageView(this)
                       img.setImageBitmap(CursorIcons.make(this, i, 44))
-                      img.setBackgroundColor(Color.rgb(221, 230, 218))
+                      img.setBackgroundColor(Theme.card(this))
                       val ilp = LinearLayout.LayoutParams(dp(56), dp(56))
                       ilp.setMargins(dp(8), 0, dp(16), 0)
 
                       val tv = TextView(this)
                       tv.text = CursorIcons.names[i]
                       tv.textSize = 18f
-                      tv.setTextColor(Color.BLACK)
+                      tv.setTextColor(Theme.fg(this))
 
                       row.addView(rb)
                       row.addView(img, ilp)
@@ -1137,16 +1292,64 @@ jobs:
 
                   val back = Button(this)
                   back.text = "INDIETRO"
+                  Theme.button(back)
                   back.setOnClickListener { finish() }
                   val blp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
                   blp.topMargin = dp(20)
                   root.addView(back, blp)
 
                   val scroll = ScrollView(this)
-                  scroll.setBackgroundColor(Color.WHITE)
+                  scroll.setBackgroundColor(Theme.bg(this))
                   scroll.addView(root)
                   setContentView(scroll)
               }
+          }
+          SENTIERO_EOF
+          mkdir -p app/src/main/java/it/sentiero/tracker
+          cat > app/src/main/java/it/sentiero/tracker/Theme.kt <<'SENTIERO_EOF'
+          package it.sentiero.tracker
+
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.Context
+          import android.graphics.Color
+          import android.widget.Button
+
+          object Theme {
+              fun dark(c: Context): Boolean =
+                  c.getSharedPreferences("xplor3", Context.MODE_PRIVATE).getBoolean("dark", false)
+
+              fun offline(c: Context): Boolean =
+                  c.getSharedPreferences("xplor3", Context.MODE_PRIVATE).getBoolean("offline", false)
+
+              fun bg(c: Context): Int = if (dark(c)) Color.BLACK else Color.WHITE
+
+              fun fg(c: Context): Int = if (dark(c)) Color.rgb(235, 238, 235) else Color.BLACK
+
+              fun sub(c: Context): Int = if (dark(c)) Color.rgb(150, 160, 152) else Color.GRAY
+
+              fun card(c: Context): Int = if (dark(c)) Color.rgb(24, 32, 27) else Color.rgb(221, 230, 218)
+
+              fun orange(c: Context): Int = if (dark(c)) Color.rgb(240, 146, 74) else Color.rgb(182, 72, 26)
+
+              fun blue(c: Context): Int = if (dark(c)) Color.rgb(90, 170, 255) else Color.rgb(30, 111, 232)
+
+              fun style(a: Activity) {
+                  if (dark(a)) {
+                      a.window.statusBarColor = Color.BLACK
+                      a.window.navigationBarColor = Color.BLACK
+                  }
+              }
+
+              fun button(b: Button) {
+                  if (dark(b.context)) {
+                      b.setBackgroundColor(Color.rgb(34, 46, 38))
+                      b.setTextColor(Color.rgb(240, 146, 74))
+                  }
+              }
+
+              fun dialog(c: Context): AlertDialog.Builder =
+                  if (dark(c)) AlertDialog.Builder(c, android.R.style.Theme_Material_Dialog_Alert) else AlertDialog.Builder(c)
           }
           SENTIERO_EOF
           mkdir -p app/src/main/java/it/sentiero/tracker
